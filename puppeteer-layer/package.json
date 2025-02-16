@@ -1,0 +1,13 @@
+{
+  "name": "nodejs",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@sparticuz/chromium": "^132.0.0",
+    "aws-sdk": "^2.1692.0",
+    "chrome-aws-lambda": "^10.1.0",
+    "install": "^0.13.0",
+    "puppeteer": "^24.2.0",
+    "puppeteer-core": "^24.2.0"
+  }
+}
