@@ -23,6 +23,7 @@ resource "aws_api_gateway_integration" "table_tennis_scores_lambda_integration" 
   integration_http_method = "POST"
   type                    = "AWS"
   uri                     = "arn:aws:apigateway:${var.aws_region}:lambda:path/2015-03-31/functions/${aws_lambda_function.table_tennis_scores_lambda.arn}/invocations"
+  timeout_milliseconds    = 29000 // Set to 29 seconds (max allowed)
 }
 
 resource "aws_lambda_permission" "table_tennis_scores_api_permission" {
