@@ -4,6 +4,12 @@ import AWS from 'aws-sdk';
 
 const s3 = new AWS.S3();
 
+function isTuesday() {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay();
+  return dayOfWeek === 2; // 2 = Tuesday
+}
+
 const currentWeekNumber = () => {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 0);
@@ -25,38 +31,33 @@ async function saveToS3(bucketName, key, data) {
     Key: key,
     Body: JSON.stringify(data),
     ContentType: 'application/json',
+    CacheControl: 'max-age=604800', // Cache for 7 days
   };
 
   await s3.putObject(params).promise();
   console.log(`Data saved to S3: ${bucketName}/${key}`);
 }
 
-async function getFromS3(bucketName, key) {
+async function isCacheStale(bucketName, key) {
   try {
-    const params = { Bucket: bucketName, Key: key };
-    const result = await s3.getObject(params).promise();
-    console.log('Cache hit! Returning data from S3.');
-    return JSON.parse(result.Body.toString());
-  } catch (error) {
-    if (error.code === 'NoSuchKey') {
-      console.log('Cache miss! No data found in S3.');
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function isCacheValid(bucketName, key, ttlInSeconds) {
-  try {
-    const params = { Bucket: bucketName, Key: key };
-    const head = await s3.headObject(params).promise();
-    
+    const head = await s3.headObject({ Bucket: bucketName, Key: key }).promise();
     const lastModified = new Date(head.LastModified).getTime();
     const now = Date.now();
-    
-    return (now - lastModified) / 1000 < ttlInSeconds;
+
+    // If today is Tuesday and last modified date is not today, invalidate cache
+    if (isTuesday()) {
+      const startOfToday = new Date();
+      startOfToday.setUTCHours(0, 0, 0, 0);
+      return lastModified < startOfToday.getTime();
+    }
+
+    // Otherwise, check if it's been more than a week
+    return (now - lastModified) / 1000 > 604800; // 7 days
   } catch (error) {
-    if (error.code === 'NotFound') return false;
+    if (error.code === 'NotFound') {
+      console.log('Cache miss! No cached file found.');
+      return true;
+    }
     throw error;
   }
 }
@@ -92,61 +93,60 @@ export const handler = async () => {
   let browser;
 
   try {
-    // Check for cached data
-    const cachedData = await getFromS3(bucketName, cacheKey);
-    const isCacheStillValid = await isCacheValid(bucketName, cacheKey, 3600); // 1 hour TTL
+    // Check if cache is stale
+    const cacheStale = await isCacheStale(bucketName, cacheKey);
+    if (cacheStale) {
+      console.log('Cache is stale. Scraping new data...');
 
-    if (cachedData && isCacheStillValid) {
+      // Launch Puppeteer using the Chromium from the layer
+      browser = await puppeteer.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(), // This gets the correct Chrome path from the layer
+        headless: chromium.headless
+      });
+
+      const page = await browser.newPage();
+      
+      // Scrape both rankings
+      const [menRankings, womenRankings] = await Promise.all([
+        scrapeRankings(page, URLS.men),
+        scrapeRankings(await browser.newPage(), URLS.women)
+      ]);
+
+      const data = {
+        men: menRankings,
+        women: womenRankings
+      };
+
+      if (!menRankings.length && !womenRankings.length) {
+        console.warn('No rankings found');
+        return {
+          statusCode: 404,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({ message: 'No rankings found' })
+        };
+      }
+
+      // Save new data to S3
+      await saveToS3(bucketName, cacheKey, data);
+
       return {
         statusCode: 200,
-        body: cachedData,
+        body: data,
         headers: { 'Content-Type': 'application/json' },
       };
     }
 
-    // Launch Puppeteer using the Chromium from the layer
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(), // This gets the correct Chrome path from the layer
-      headless: chromium.headless
-    });
-
-    const page = await browser.newPage();
-    
-    // Scrape both rankings
-    const [menRankings, womenRankings] = await Promise.all([
-      scrapeRankings(page, URLS.men),
-      scrapeRankings(await browser.newPage(), URLS.women)
-    ]);
-
-    const data = {
-      men: menRankings,
-      women: womenRankings
-    };
-
-    if (!menRankings.length && !womenRankings.length) {
-      console.warn('No rankings found');
-      return {
-        statusCode: 404,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        },
-        body: JSON.stringify({ message: 'No rankings found' })
-      };
-    }
-
-     // Save new data to S3
-     await saveToS3(bucketName, cacheKey, data);
-
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        // 'Access-Control-Allow-Origin': '*'
-      },
-      body: data
-    };
+     // Serve cached data
+     const cachedData = await s3.getObject({ Bucket: bucketName, Key: cacheKey }).promise();
+     return {
+       statusCode: 200,
+       body: JSON.parse(cachedData.Body.toString()),
+       headers: { 'Content-Type': 'application/json' },
+     };
   } catch (error) {
     console.error(error);
     return {
