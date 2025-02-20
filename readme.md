@@ -34,3 +34,4 @@ graph LR
 
 ## TODO
 1. Add tf config to auto deploy the API Gateway
+2. CORS
