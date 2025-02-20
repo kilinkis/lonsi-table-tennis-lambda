@@ -21,13 +21,23 @@ export const handler = async () => {
 
     // Extract the desired HTML content
     const content = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('#content tbody tr.rrow'));
-
-      const results = rows.map(row => {
-        return row.querySelector('td:nth-child(2)').textContent.trim();
-      }).filter(Boolean); // Remove any null values
-
-      return results;
+      const extractText = (row, index) => row.querySelector(`td:nth-child(${index})`).textContent.trim();
+    
+      return Array.from(document.querySelectorAll('#content tbody tr.rrow'))
+        .map(row => {
+          try {
+            return {
+              rank: extractText(row, 1),
+              name: extractText(row, 2),
+              assoc: extractText(row, 3),
+              points: extractText(row, 4)
+            };
+          } catch (err) {
+            console.error('Error parsing row:', err);
+            return null;
+          }
+        })
+        .filter(Boolean);
     });
     
     if (!content || content.length === 0) {
