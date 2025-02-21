@@ -4,7 +4,7 @@ import AWS from 'aws-sdk';
 
 const s3 = new AWS.S3();
 
-function isTuesday() {
+const isTuesday = () => {
   const now = new Date();
   const dayOfWeek = now.getUTCDay();
   return dayOfWeek === 2; // 2 = Tuesday
@@ -25,7 +25,7 @@ const URLS = {
   women: `https://www.ittf.com/wp-content/uploads/2025/02/2025_${currentWeekNumber()}_SEN_WS.html`
 };
 
-async function saveToS3(bucketName, key, data) {
+ const saveToS3 = async (bucketName, key, data) =>  {
   const params = {
     Bucket: bucketName,
     Key: key,
@@ -38,7 +38,7 @@ async function saveToS3(bucketName, key, data) {
   console.log(`Data saved to S3: ${bucketName}/${key}`);
 }
 
-async function isCacheStale(bucketName, key) {
+const isCacheStale = async (bucketName, key) => {
   try {
     const head = await s3.headObject({ Bucket: bucketName, Key: key }).promise();
     const lastModified = new Date(head.LastModified).getTime();
@@ -61,6 +61,15 @@ async function isCacheStale(bucketName, key) {
     throw error;
   }
 }
+
+const formatResponse = (statusCode, body) => ({
+  statusCode,
+  headers: {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*'
+  },
+  body
+});
 
 const scrapeRankings = async (page, url) => {
   await page.goto(url, { waitUntil: 'networkidle2' });
@@ -120,39 +129,20 @@ export const handler = async () => {
 
       if (!menRankings.length && !womenRankings.length) {
         console.warn('No rankings found');
-        return {
-          statusCode: 404,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          },
-          body: JSON.stringify({ message: 'No rankings found' })
-        };
+        return formatResponse(404, { message: 'No rankings found' });
       }
 
       // Save new data to S3
       await saveToS3(bucketName, cacheKey, data);
-
-      return {
-        statusCode: 200,
-        body: data,
-        headers: { 'Content-Type': 'application/json' },
-      };
+      return formatResponse(200, data);
     }
 
      // Serve cached data
      const cachedData = await s3.getObject({ Bucket: bucketName, Key: cacheKey }).promise();
-     return {
-       statusCode: 200,
-       body: JSON.parse(cachedData.Body.toString()),
-       headers: { 'Content-Type': 'application/json' },
-     };
+     return formatResponse(200, JSON.parse(cachedData.Body.toString()));
   } catch (error) {
     console.error(error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message })
-    };
+    return formatResponse(500, { error: error.message });
   } finally {
     if (browser) {
       await browser.close();
