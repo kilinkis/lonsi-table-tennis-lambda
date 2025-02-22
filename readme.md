@@ -60,4 +60,4 @@ This repository contains a Terraform configuration for managing AWS resources re
 3. Apply the configuration using `terraform apply`.
 
 ## TODO
-1. fix wp urls
+1. 

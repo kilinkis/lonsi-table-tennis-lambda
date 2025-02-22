@@ -19,10 +19,25 @@ const currentWeekNumber = () => {
   return Math.ceil((day + start.getDay() + 1) / 7);
 }
 
-// these URLs might fail next month
-const URLS = {
-  men: `https://www.ittf.com/wp-content/uploads/2025/02/2025_${currentWeekNumber()}_SEN_MS.html`,
-  women: `https://www.ittf.com/wp-content/uploads/2025/02/2025_${currentWeekNumber()}_SEN_WS.html`
+const getRankingUrls = async (page) => {
+  await page.goto('https://www.ittf.com/rankings/', { 
+    waitUntil: 'networkidle2',
+    timeout: 15000 
+  });
+
+  return page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll('.theiaStickySidebar .page-content ul:nth-of-type(1) li:first-child a'));
+    const urls = {
+      men: links.find(link => link.href.includes('_SEN_MS'))?.href,
+      women: links.find(link => link.href.includes('_SEN_WS'))?.href
+    };
+
+    if (!urls.men || !urls.women) {
+      throw new Error('Could not find ranking URLs');
+    }
+
+    return urls;
+  });
 };
 
  const saveToS3 = async (bucketName, key, data) =>  {
@@ -115,11 +130,13 @@ export const handler = async () => {
       });
 
       const page = await browser.newPage();
+
+      const urls = await getRankingUrls(page);
       
       // Scrape both rankings
       const [menRankings, womenRankings] = await Promise.all([
-        scrapeRankings(page, URLS.men),
-        scrapeRankings(await browser.newPage(), URLS.women)
+        scrapeRankings(page, urls.men),
+        scrapeRankings(await browser.newPage(), urls.women)
       ]);
 
       const data = {
